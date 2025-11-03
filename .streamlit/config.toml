@@ -1,0 +1,12 @@
+[theme]
+# ===== Cores principais (FedEx) =====
+primaryColor = "#4D148C"          # FedEx Purple
+backgroundColor = "#FFFFFF"       # Fundo principal branco
+secondaryBackgroundColor = "#F8F8FA"  # Cards e containers
+textColor = "#2C2C2C"             # Texto padrão
+font = "sans serif"               # Padrão legível
+
+# ===== Ajustes adicionais =====
+# Você pode usar "serif" ou "monospace" se preferir outro estilo.
+# Outras cores possíveis:
+# primaryColor = "#FF6600"   # FedEx Orange (alternativo)
