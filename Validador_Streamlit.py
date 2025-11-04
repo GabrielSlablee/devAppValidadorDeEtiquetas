@@ -136,7 +136,6 @@ class DatabaseManager:
     def _init_db(self):
         with self._get_conn() as conn:
             with conn.cursor() as cur:
-                # Tabela de registros
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS registros (
                         id BIGSERIAL PRIMARY KEY,
@@ -151,8 +150,6 @@ class DatabaseManager:
                     );
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_tp_tppd ON registros(tipo_tela, transporte, pedido);")
-
-                # Tabela de usuários
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS usuarios (
                         id BIGSERIAL PRIMARY KEY,
@@ -269,7 +266,6 @@ class DatabaseManager:
         if apenas_div:
             base += " AND divergencia = 1"
         base += " ORDER BY data_hora ASC"
-
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(base, tuple(params))
@@ -301,14 +297,14 @@ class DatabaseManager:
                 return cols, rows
 
 # ============ Estado Global ============
-if "db" not in st.session_state:
-    st.session_state.db = DatabaseManager()
+db = DatabaseManager()
 
 st.session_state.setdefault("user", None)
 st.session_state.setdefault("page", "login")
 st.session_state.setdefault("ult_leitura", "-")
 st.session_state.setdefault("volumes", [])
 st.session_state.setdefault("vol_count", 0)
+st.session_state.setdefault("clear_form", False)
 
 # ============ Helpers ============
 def sanitize_code(code: str, max_len: int = 10) -> str:
@@ -319,7 +315,12 @@ def focus_input_by_label(label_text: str):
     <script>
     const inputs = parent.document.querySelectorAll('input');
     const el = Array.from(inputs).find(x => (x.getAttribute('aria-label')||'').includes("{label_text}"));
-    if (el) {{ el.focus(); el.select(); }}
+    if (el) {{ 
+        setTimeout(() => {{
+            el.focus();
+            el.select();
+        }}, 100);
+    }}
     </script>
     """, height=0)
 
@@ -327,7 +328,7 @@ def _sound_data_url(path: Path) -> str | None:
     if not path or not path.exists(): return None
     mime = "audio/wav" if path.suffix.lower() == ".wav" else "audio/mpeg"
     b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:{mime};base64,{b64}"
+    return f"{mime};base64,{b64}"
 
 if "SND_NOK" not in st.session_state:
     st.session_state["SND_NOK"] = _sound_data_url(NOK_SOUND)
@@ -348,14 +349,12 @@ def registrar_dado(usuario: str, tela_origem: str, transporte: str, pedido: str,
         "supervisor_liberou": supervisor_liberou,
         "motivo_divergencia": motivo_divergencia
     }
-    st.session_state.db.append_row(row)
+    db.append_row(row)
 
 def verificar_registro_existente(transporte: str, pedido: str, tipo_tela: str = "LEITURA") -> bool:
-    return st.session_state.db.existe_registro(transporte, pedido, tipo_tela)
+    return db.existe_registro(transporte, pedido, tipo_tela)
 
 # ============ Telas ============
-from pathlib import Path
-
 def render_header():
     with st.container():
         col_logo, col_title = st.columns([1, 5])
@@ -369,7 +368,7 @@ def render_header():
             st.markdown('</div>', unsafe_allow_html=True)
 
 def setup_admin_gate():
-    if st.session_state.db.existe_admin():
+    if db.existe_admin():
         return False
     st.info("👋 Bem-vindo! Crie o **primeiro administrador** para começar.")
     with st.form("criar_admin", clear_on_submit=False):
@@ -384,7 +383,7 @@ def setup_admin_gate():
                 st.error("As senhas não conferem.")
             else:
                 try:
-                    st.session_state.db.criar_usuario(uid, nome or uid, "admin", senha1, ativo=1)
+                    db.criar_usuario(uid, nome or uid, "admin", senha1, ativo=1)
                     st.success("Administrador criado com sucesso!")
                     st.rerun()
                 except psycopg2.errors.UniqueViolation:
@@ -410,7 +409,7 @@ def dialog_divergencia(transporte: str, pedido: str, origem: str):
     if cancelar:
         st.rerun()
     if concluir:
-        auth = st.session_state.db.autenticar(sid, spw)
+        auth = db.autenticar(sid, spw)
         if auth and auth["role"] in ("supervisor", "admin"):
             if not motivo.strip():
                 st.warning("Informe o motivo da divergência.")
@@ -437,17 +436,10 @@ def dialog_divergencia(transporte: str, pedido: str, origem: str):
         else:
             st.error("Credenciais inválidas ou papel insuficiente.")
 
-# === Telas principais (leitura, varios, exportar, cadastros, login) ===
-# (mantidas idênticas à versão anterior, mas usando a nova DatabaseManager)
-# ... (código das funções tela_leitura, tela_varios, etc. foi preservado na lógica)
-
-# [As funções tela_leitura, tela_varios, tela_exportar, tela_cadastros e tela_login]
-# foram mantidas com a mesma lógica da versão anterior, apenas usando a nova classe.
-# Por brevidade, mantenho a estrutura abaixo com os mesmos nomes.
-
+# === Telas principais ===
 def form_leitura(scan_mode: bool):
     t_key, p_key = "scan_t", "scan_p"
-    with st.form("form_leitura", clear_on_submit=False):
+    with st.form("form_leitura"):
         c1, c2, c3 = st.columns([1,1,1])
         with c1:
             st.text_input("Transporte (máx 10)", key=t_key, max_chars=10, placeholder="Bipe Transporte")
@@ -466,6 +458,12 @@ def tela_leitura(scan_mode: bool):
     st.caption("No Modo Scan, bipar **Transporte** e depois **Pedido**. Se T ≠ P ou duplicado, exige liberação.")
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
+    # Limpeza segura dos campos
+    if st.session_state.get("clear_form", False):
+        st.session_state["scan_t"] = ""
+        st.session_state["scan_p"] = ""
+        st.session_state.clear_form = False
+
     submit, t_raw, p_raw = form_leitura(scan_mode)
 
     colA, colB, colC = st.columns([2,1,1])
@@ -473,32 +471,54 @@ def tela_leitura(scan_mode: bool):
         st.markdown(f"**Última leitura:** {st.session_state.ult_leitura}")
     with colB:
         if st.button("📦 Vários Volumes", use_container_width=True):
-            st.session_state.page = "varios"; st.rerun()
+            st.session_state.page = "varios"
+            st.rerun()
     with colC:
         if st.button("📤 Exportar CSV", use_container_width=True):
-            st.session_state.page = "exportar"; st.rerun()
+            st.session_state.page = "exportar"
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
     if submit:
         t = sanitize_code(t_raw)
         p = sanitize_code(p_raw)
+
         if not t or not p:
             st.warning("Preencha ambos os campos.")
+            if not t:
+                focus_input_by_label("Transporte (máx 10)")
+            elif not p:
+                focus_input_by_label("Pedido (máx 10)")
             return
+
         if t != p or verificar_registro_existente(t, p, "LEITURA"):
             dialog_divergencia(t, p, "LEITURA")
             return
+
         registrar_dado(st.session_state.user["uid"], "LEITURA", t, p)
         st.session_state.ult_leitura = f"T:{t}  P:{p}"
         st.success(f"✅ Registrado com sucesso: T:{t} P:{p}")
+
+        # Limpeza para próxima leitura
         st.session_state["scan_t"] = ""
         st.session_state["scan_p"] = ""
+        st.session_state.clear_form = True
         st.rerun()
+
+    # Foco automático (após renderização completa)
     if scan_mode:
-        focus_input_by_label("Transporte (máx 10)")
+        t_clean = sanitize_code(st.session_state.get("scan_t", ""))
+        p_clean = sanitize_code(st.session_state.get("scan_p", ""))
+
+        if not t_clean:
+            focus_input_by_label("Transporte (máx 10)")
+        elif len(t_clean) >= 10 and not p_clean:
+            focus_input_by_label("Pedido (máx 10)")
+        else:
+            focus_input_by_label("Transporte (máx 10)")
 
 def form_varios():
-    with st.form("form_varios", clear_on_submit=False):
+    with st.form("form_varios"):
         c1, c2, c3 = st.columns([1,1,1])
         with c1:
             st.text_input("Transporte (máx 10)", key="varios_t", max_chars=10, placeholder="Bipe Transporte")
@@ -516,7 +536,9 @@ def tela_varios():
     st.markdown("#### 📦 Leitura em Lote (Vários Volumes)")
     st.caption("Quando T = P, registra automaticamente. Caso contrário, exige liberação de supervisor.")
     st.markdown('<div class="card">', unsafe_allow_html=True)
+
     submit, t_raw, p_raw = form_varios()
+
     with st.container():
         if not st.session_state.volumes:
             st.info("Nenhum volume registrado ainda.")
@@ -526,16 +548,21 @@ def tela_varios():
                 style = ":red[" if item.get("divergente") else ""
                 close = "]" if item.get("divergente") else ""
                 st.markdown(f"{style}{status} Vol. {item['n']} – T:{item['transporte']}  P:{item['pedido']}{close}")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📥 Leitura Simples", use_container_width=True):
-            st.session_state.page = "leitura"; st.rerun()
+            st.session_state.page = "leitura"
+            st.rerun()
     with col2:
         if st.button("🗑️ Zerar Lista", use_container_width=True, type="secondary"):
-            st.session_state.volumes = []; st.session_state.vol_count = 0; st.rerun()
+            st.session_state.volumes = []
+            st.session_state.vol_count = 0
+            st.rerun()
     with col3:
         if st.button("📤 Exportar CSV", use_container_width=True):
-            st.session_state.page = "exportar"; st.rerun()
+            st.session_state.page = "exportar"
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
     if submit:
@@ -543,17 +570,21 @@ def tela_varios():
         p = sanitize_code(p_raw)
         if not t or not p:
             st.warning("Preencha ambos os campos.")
+            focus_input_by_label("Transporte (máx 10)")
             return
         if t != p:
             dialog_divergencia(t, p, "VARIOS")
             return
+
         registrar_dado(st.session_state.user["uid"], "VARIOS", t, p)
         st.session_state.vol_count += 1
         st.session_state.volumes.append({"n": st.session_state.vol_count, "transporte": t, "pedido": p, "divergente": False})
         st.success(f"✅ Registrado: T:{t} P:{p}")
+
         st.session_state["varios_t"] = ""
         st.session_state["varios_p"] = ""
         st.rerun()
+
     focus_input_by_label("Transporte (máx 10)")
 
 def tela_exportar():
@@ -570,7 +601,7 @@ def tela_exportar():
         tipo = st.selectbox("Tipo de Tela", ["TODAS", "LEITURA", "VARIOS"])
     with col4:
         apenas_div = st.checkbox("Apenas divergências", value=False)
-    cols, rows = st.session_state.db.query_export(dt_ini, dt_fim, tipo, apenas_div)
+    cols, rows = db.query_export(dt_ini, dt_fim, tipo, apenas_div)
     st.write(f"Registros encontrados: **{len(rows)}**")
     if rows:
         buffer = io.StringIO()
@@ -610,7 +641,7 @@ def tela_cadastros():
             st.error("As senhas não conferem.")
         else:
             try:
-                st.session_state.db.criar_usuario(uid, nome or uid, role, senha1, ativo=int(ativo))
+                db.criar_usuario(uid, nome or uid, role, senha1, ativo=int(ativo))
                 st.success("✅ Usuário criado!")
             except psycopg2.errors.UniqueViolation:
                 st.error("❌ Login já existe.")
@@ -620,7 +651,7 @@ def tela_cadastros():
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
     busca = st.text_input("🔎 Buscar por login ou nome", placeholder="ex.: gabriel")
-    cols, rows = st.session_state.db.listar_usuarios(busca)
+    cols, rows = db.listar_usuarios(busca)
     if not rows:
         st.info("Nenhum usuário encontrado.")
     else:
@@ -643,19 +674,22 @@ def tela_cadastros():
                                              key=f"role_{rec_dict['id']}")
                     novo_ativo = st.checkbox("Ativo", value=bool(rec_dict["ativo"]), key=f"ativo_{rec_dict['id']}")
                     if st.button("Salvar", key=f"salvar_{rec_dict['id']}", type="primary"):
-                        st.session_state.db.atualizar_usuario(rec_dict["id"], novo_nome, novo_role, int(novo_ativo))
-                        st.success("✅ Alterações salvas."); st.rerun()
+                        db.atualizar_usuario(rec_dict["id"], novo_nome, novo_role, int(novo_ativo))
+                        st.success("✅ Alterações salvas.")
+                        st.rerun()
                     nova_senha1 = st.text_input("Nova senha", type="password", key=f"ns1_{rec_dict['id']}")
                     nova_senha2 = st.text_input("Confirmar", type="password", key=f"ns2_{rec_dict['id']}")
                     if st.button("Resetar senha", key=f"reset_{rec_dict['id']}"):
                         if nova_senha1 and nova_senha1 == nova_senha2:
-                            st.session_state.db.resetar_senha(rec_dict["id"], nova_senha1)
-                            st.success("✅ Senha redefinida."); st.rerun()
+                            db.resetar_senha(rec_dict["id"], nova_senha1)
+                            st.success("✅ Senha redefinida.")
+                            st.rerun()
                         else:
                             st.error("As senhas não conferem.")
                     if st.button("Remover", key=f"del_{rec_dict['id']}", type="secondary"):
-                        st.session_state.db.remover_usuario(rec_dict["id"])
-                        st.success("✅ Usuário removido."); st.rerun()
+                        db.remover_usuario(rec_dict["id"])
+                        st.success("✅ Usuário removido.")
+                        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 def tela_login():
@@ -668,7 +702,7 @@ def tela_login():
         pwd = st.text_input("Senha", type="password")
         ok = st.form_submit_button("Entrar", use_container_width=True)
     if ok:
-        auth = st.session_state.db.autenticar(uid, pwd)
+        auth = db.autenticar(uid, pwd)
         if auth:
             st.session_state.user = auth
             st.session_state.page = "leitura"
@@ -718,13 +752,17 @@ page = st.session_state.page
 if page == "login":
     tela_login()
 elif page == "leitura":
-    require_login(); tela_leitura(st.session_state.get("scan_mode", True))
+    require_login()
+    tela_leitura(st.session_state.get("scan_mode", True))
 elif page == "varios":
-    require_login(); tela_varios()
+    require_login()
+    tela_varios()
 elif page == "exportar":
-    require_login(); tela_exportar()
+    require_login()
+    tela_exportar()
 elif page == "cadastros":
-    require_login(); tela_cadastros()
+    require_login()
+    tela_cadastros()
 
 st.markdown("---")
 col1, col2 = st.columns([1, 3])
