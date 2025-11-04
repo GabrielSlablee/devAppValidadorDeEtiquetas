@@ -1,0 +1,22 @@
+# Banco de dados local (NUNCA deve ir pro GitHub)
+dados_label.db
+data/
+
+# Arquivos de configuração sensíveis
+.streamlit/secrets.toml
+
+# Cache e logs do Python
+__pycache__/
+*.pyc
+*.log
+
+# Ambientes virtuais (se usar)
+venv/
+env/
+.venv/
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
