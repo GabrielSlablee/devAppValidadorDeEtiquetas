@@ -299,16 +299,25 @@ class DatabaseManager:
 # ============ Estado Global ============
 db = DatabaseManager()
 
-st.session_state.setdefault("user", None)
-st.session_state.setdefault("page", "login")
-st.session_state.setdefault("ult_leitura", "-")
-st.session_state.setdefault("volumes", [])
-st.session_state.setdefault("vol_count", 0)
-st.session_state.setdefault("clear_form", False)
+# Inicialização segura com tipos serializáveis
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "page" not in st.session_state:
+    st.session_state.page = "login"
+if "ult_leitura" not in st.session_state:
+    st.session_state.ult_leitura = "-"
+if "volumes" not in st.session_state:
+    st.session_state.volumes = []
+if "vol_count" not in st.session_state:
+    st.session_state.vol_count = 0
+if "clear_form" not in st.session_state:
+    st.session_state.clear_form = False
 
 # ============ Helpers ============
 def sanitize_code(code: str, max_len: int = 10) -> str:
-    return re.sub(r'[^0-9A-Za-z]', '', code or '')[:max_len]
+    if code is None:
+        return ""
+    return re.sub(r'[^0-9A-Za-z]', '', str(code)).strip()[:max_len]
 
 def focus_input_by_label(label_text: str):
     html(f"""
@@ -341,18 +350,18 @@ def play_sound(data_url_key: str):
 def registrar_dado(usuario: str, tela_origem: str, transporte: str, pedido: str,
                    divergencia: bool = False, supervisor_liberou: str = "", motivo_divergencia: str = ""):
     row = {
-        "usuario": usuario,
-        "tipo_tela": tela_origem,
-        "transporte": transporte[:10],
-        "pedido": pedido[:10],
-        "divergencia": divergencia,
-        "supervisor_liberou": supervisor_liberou,
-        "motivo_divergencia": motivo_divergencia
+        "usuario": str(usuario),
+        "tipo_tela": str(tela_origem),
+        "transporte": str(transporte)[:10],
+        "pedido": str(pedido)[:10],
+        "divergencia": bool(divergencia),
+        "supervisor_liberou": str(supervisor_liberou) if supervisor_liberou else "",
+        "motivo_divergencia": str(motivo_divergencia) if motivo_divergencia else ""
     }
     db.append_row(row)
 
 def verificar_registro_existente(transporte: str, pedido: str, tipo_tela: str = "LEITURA") -> bool:
-    return db.existe_registro(transporte, pedido, tipo_tela)
+    return db.existe_registro(str(transporte), str(pedido), str(tipo_tela))
 
 # ============ Telas ============
 def render_header():
@@ -417,18 +426,18 @@ def dialog_divergencia(transporte: str, pedido: str, origem: str):
             registrar_dado(
                 usuario=st.session_state.user["uid"],
                 tela_origem=origem,
-                transporte=transporte,
-                pedido=pedido,
+                transporte=str(transporte),
+                pedido=str(pedido),
                 divergencia=True,
-                supervisor_liberou=sid,
-                motivo_divergencia=motivo.strip()
+                supervisor_liberou=str(sid),
+                motivo_divergencia=str(motivo.strip())
             )
             if origem == "VARIOS":
                 st.session_state.vol_count += 1
                 st.session_state.volumes.append({
-                    "n": st.session_state.vol_count,
-                    "transporte": transporte,
-                    "pedido": pedido,
+                    "n": int(st.session_state.vol_count),
+                    "transporte": str(transporte),
+                    "pedido": str(pedido),
                     "divergente": True
                 })
             st.success("✅ Divergência liberada com sucesso!")
@@ -496,16 +505,15 @@ def tela_leitura(scan_mode: bool):
             return
 
         registrar_dado(st.session_state.user["uid"], "LEITURA", t, p)
-        st.session_state.ult_leitura = f"T:{t}  P:{p}"
+        st.session_state.ult_leitura = f"T:{str(t)}  P:{str(p)}"
         st.success(f"✅ Registrado com sucesso: T:{t} P:{p}")
 
-        # Limpeza para próxima leitura
         st.session_state["scan_t"] = ""
         st.session_state["scan_p"] = ""
         st.session_state.clear_form = True
         st.rerun()
 
-    # Foco automático (após renderização completa)
+    # Foco automático
     if scan_mode:
         t_clean = sanitize_code(st.session_state.get("scan_t", ""))
         p_clean = sanitize_code(st.session_state.get("scan_p", ""))
@@ -578,7 +586,12 @@ def tela_varios():
 
         registrar_dado(st.session_state.user["uid"], "VARIOS", t, p)
         st.session_state.vol_count += 1
-        st.session_state.volumes.append({"n": st.session_state.vol_count, "transporte": t, "pedido": p, "divergente": False})
+        st.session_state.volumes.append({
+            "n": int(st.session_state.vol_count),
+            "transporte": str(t),
+            "pedido": str(p),
+            "divergente": False
+        })
         st.success(f"✅ Registrado: T:{t} P:{p}")
 
         st.session_state["varios_t"] = ""
@@ -718,7 +731,7 @@ def sidebar_nav():
         st.markdown('<div class="sidebar-top">FedEx • Validador de Etiquetas</div>', unsafe_allow_html=True)
         st.session_state["scan_mode"] = st.toggle(
             "🔄 Modo Scan (2 bipagens)",
-            value=st.session_state.get("scan_mode", True),
+            value=bool(st.session_state.get("scan_mode", True)),
             help="Ative para fluxo contínuo: bipe Transporte → bipe Pedido"
         )
         if st.session_state.user:
