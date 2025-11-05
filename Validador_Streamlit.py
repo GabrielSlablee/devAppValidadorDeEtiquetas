@@ -299,19 +299,24 @@ class DatabaseManager:
 # ============ Estado Global ============
 db = DatabaseManager()
 
-# Inicialização segura com tipos serializáveis
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "page" not in st.session_state:
-    st.session_state.page = "login"
-if "ult_leitura" not in st.session_state:
-    st.session_state.ult_leitura = "-"
-if "volumes" not in st.session_state:
-    st.session_state.volumes = []
-if "vol_count" not in st.session_state:
-    st.session_state.vol_count = 0
-if "clear_form" not in st.session_state:
-    st.session_state.clear_form = False
+# Inicialização segura de todo o estado — incluindo widgets
+init_keys = {
+    "user": None,
+    "page": "login",
+    "ult_leitura": "-",
+    "volumes": [],
+    "vol_count": 0,
+    "clear_form": False,
+    "scan_t": "",
+    "scan_p": "",
+    "varios_t": "",
+    "varios_p": "",
+    "scan_mode": True,
+}
+
+for key, default in init_keys.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # ============ Helpers ============
 def sanitize_code(code: str, max_len: int = 10) -> str:
@@ -469,8 +474,6 @@ def tela_leitura(scan_mode: bool):
 
     # Limpeza segura dos campos
     if st.session_state.get("clear_form", False):
-        st.session_state["scan_t"] = ""
-        st.session_state["scan_p"] = ""
         st.session_state.clear_form = False
 
     submit, t_raw, p_raw = form_leitura(scan_mode)
@@ -507,10 +510,8 @@ def tela_leitura(scan_mode: bool):
         registrar_dado(st.session_state.user["uid"], "LEITURA", t, p)
         st.session_state.ult_leitura = f"T:{str(t)}  P:{str(p)}"
         st.success(f"✅ Registrado com sucesso: T:{t} P:{p}")
-
-        st.session_state["scan_t"] = ""
-        st.session_state["scan_p"] = ""
-        st.session_state.clear_form = True
+        st.session_state.scan_t = ""   # ✅ Limpa o campo
+        st.session_state.scan_p = ""   # ✅ Limpa o campo
         st.rerun()
 
     # Foco automático
@@ -594,8 +595,8 @@ def tela_varios():
         })
         st.success(f"✅ Registrado: T:{t} P:{p}")
 
-        st.session_state["varios_t"] = ""
-        st.session_state["varios_p"] = ""
+        st.session_state.scan_t = ""
+        st.session_state.scan_p = ""
         st.rerun()
 
     focus_input_by_label("Transporte (máx 10)")
