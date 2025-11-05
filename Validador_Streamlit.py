@@ -472,11 +472,28 @@ def tela_leitura(scan_mode: bool):
     st.caption("No Modo Scan, bipar **Transporte** e depois **Pedido**. Se T ≠ P ou duplicado, exige liberação.")
     st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    # Limpeza segura dos campos
-    if st.session_state.get("clear_form", False):
-        st.session_state.clear_form = False
+    # Campos de entrada SEM formulário
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        transporte_input = st.text_input(
+            "Transporte (máx 10)", 
+            value=st.session_state.scan_t,
+            key="scan_t_input",
+            max_chars=10,
+            placeholder="Bipe Transporte"
+        )
+    with c2:
+        pedido_input = st.text_input(
+            "Pedido (máx 10)", 
+            value=st.session_state.scan_p,
+            key="scan_p_input",
+            max_chars=10,
+            placeholder="Bipe Pedido"
+        )
 
-    submit, t_raw, p_raw = form_leitura(scan_mode)
+    # Atualiza o session_state com os valores atuais
+    st.session_state.scan_t = transporte_input.strip()
+    st.session_state.scan_p = pedido_input.strip()
 
     colA, colB, colC = st.columns([2,1,1])
     with colA:
@@ -491,34 +508,28 @@ def tela_leitura(scan_mode: bool):
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    if submit:
-        t = sanitize_code(t_raw)
-        p = sanitize_code(p_raw)
+    # Processamento automático quando ambos os campos estão preenchidos
+    t = sanitize_code(st.session_state.scan_t)
+    p = sanitize_code(st.session_state.scan_p)
 
-        if not t or not p:
-            st.warning("Preencha ambos os campos.")
-            if not t:
-                focus_input_by_label("Transporte (máx 10)")
-            elif not p:
-                focus_input_by_label("Pedido (máx 10)")
-            return
-
+    if t and p:
+        # Tenta registrar automaticamente
         if t != p or verificar_registro_existente(t, p, "LEITURA"):
+            # Não limpa os campos — a divergência precisa deles
             dialog_divergencia(t, p, "LEITURA")
-            return
-
-        registrar_dado(st.session_state.user["uid"], "LEITURA", t, p)
-        st.session_state.ult_leitura = f"T:{str(t)}  P:{str(p)}"
-        st.success(f"✅ Registrado com sucesso: T:{t} P:{p}")
-        st.session_state.scan_t = ""   # ✅ Limpa o campo
-        st.session_state.scan_p = ""   # ✅ Limpa o campo
-        st.rerun()
+        else:
+            registrar_dado(st.session_state.user["uid"], "LEITURA", t, p)
+            st.session_state.ult_leitura = f"T:{t}  P:{p}"
+            st.success(f"✅ Registrado com sucesso: T:{t} P:{p}")
+            # Limpeza segura
+            st.session_state.scan_t = ""
+            st.session_state.scan_p = ""
+            st.rerun()
 
     # Foco automático
     if scan_mode:
-        t_clean = sanitize_code(st.session_state.get("scan_t", ""))
-        p_clean = sanitize_code(st.session_state.get("scan_p", ""))
-
+        t_clean = sanitize_code(st.session_state.scan_t)
+        p_clean = sanitize_code(st.session_state.scan_p)
         if not t_clean:
             focus_input_by_label("Transporte (máx 10)")
         elif len(t_clean) >= 10 and not p_clean:
